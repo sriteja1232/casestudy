@@ -1,0 +1,72 @@
+
+try{
+    node{
+        def mavenHome
+        def mavenCMD
+        def docker
+        def dockerCMD
+        def tagName = "1.4"
+        
+        stage('Preparation'){
+            echo "Preparing the Jenkins environment with required tools"
+            mavenHome = tool name: 'Maven1', type: 'maven'
+            mavenCMD = "${mavenHome}/bin/mvn"
+            docker = tool name: 'docker', type: 'org.jenkinsci.plugins.docker.commons.tools.DockerTool'
+            //dockerCMD = "$docker/bin/docker"
+        }
+        
+        stage('git checkout'){
+            echo "Checking out the code from git repository."
+            git 'https://github.com/sriteja1232/batch10-1.git'
+                             }
+        
+        stage('Build, Test and Package'){
+            echo "Building the springboot application"
+            sh "${mavenCMD} clean package"
+            //sh "java -jar target/my-test-app*.jar"
+                                      }
+        stage('Sonar Scan'){
+echo "Scanning application for vulnerabilities using Sonar..."
+sh "${mavenCMD} sonar:sonar -Dsonar.host.url=http://35.184.215.101:9000/ -Dsonar.projectKey=sonar -Dsonar.login=admin -Dsonar.password=password -Dsonar.java.binaries=target"
+} 
+           stage('Publish Report'){
+                echo " Publishing HTML report.."
+                publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '', reportFiles: 'index.html', reportName: 'HTML Report', reportTitles: ''])
+            
+            }         
+              
+        stage('Build Docker Image'){
+            echo "Building docker image for springboot application."
+            sh "docker build -t sriteja12321/spring:${tagName} ."
+            }
+        stage("Push Docker Image to Docker Registry"){
+            echo "Pushing image to docker hub"
+            withCredentials([string(credentialsId: 'dockerPwd', variable: 'dockerHubPwd')]) {
+            sh "docker login -u sriteja12321 -p ${dockerHubPwd}"
+            }
+            sh "docker push sriteja12321/spring:${tagName}"
+        }
+        stage('Deploy Application'){
+            echo "Installing desired software.."
+            echo "Bring docker service up and running"
+            echo "Deploying spring application"
+            ansiblePlaybook credentialsId: 'private-key', disableHostKeyChecking: true, installation: 'ansible 2.9.22', inventory: '/etc/ansible/hosts', playbook: 'deploy-playbook.yml'
+        }
+          stage('Clean up'){
+            echo "Cleaning up the workspace..."
+            cleanWs()
+        }
+        stage('Email test'){
+            emailext attachLog: true, body: 'Hi sriteja, This is your first pipeline  log report.', subject: 'My first jenkins pipeline', to: 'sriteja.boddula@gmail.com'
+        }
+    }
+}
+catch(Exception err){
+        echo "Exception occured."
+        currentBuild.result="FAILURE"
+}
+finally{
+       (currentBuild.result!= "ABORTED") && node("master") {
+        echo "finally gets executed and end an email notification for every build"
+}
+}
